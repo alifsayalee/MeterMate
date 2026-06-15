@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "acp-maxio-advanced-billing-ts": {
+      "type": "http",
+      "url": "https://chatbotapi.apimatic.io/mcp/9dbcd58a-8e31-4c13-8b95-16bef3b705f0/typescript"
+    },
+    "acp-slack-web-api-ts": {
+      "type": "http",
+      "url": "https://chatbotapi.apimatic.io/mcp/cfd3dd25-d743-45d5-96cb-439b8d60d568/typescript"
+    }
+  }
+}
