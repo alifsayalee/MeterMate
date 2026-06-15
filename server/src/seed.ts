@@ -1,19 +1,32 @@
 import {
   ApiError,
+  type CreateMeteredComponent,
   type CreateOrUpdateProductRequest,
   type CreateProductFamilyRequest,
   IntervalUnit,
+  PricingScheme,
 } from '@maxio-com/advanced-billing-sdk';
 import { config } from './config.js';
-import { productFamiliesController, productsController } from './maxioClient.js';
+import {
+  componentsController,
+  productFamiliesController,
+  productsController,
+} from './maxioClient.js';
 
 /**
- * Phase-1 seed. Creates (idempotently) the product family and the two recurring
- * plans UC1 subscribes against: `basic` ($99/mo) and `pro` ($299/mo). Metered /
- * event-based components are seeded later, when their use cases (UC2) are built.
+ * Phase-1 seed. Creates (idempotently):
+ *  - the product family,
+ *  - the two recurring plans UC1 subscribes against: `basic` ($99/mo) and
+ *    `pro` ($299/mo),
+ *  - the metered component UC2 reports usage against: `consulting-minutes`
+ *    ($2.00/minute, per-unit).
  *
- * Idempotent: existing handles are detected via readProductByHandle /
- * listProductFamilies and left untouched, so re-running is safe.
+ * The event-based `api-calls` component is intentionally NOT seeded here: the
+ * SDK cannot create the required Event-Based Billing metric, so it must be set
+ * up in the Maxio UI. The usage service already dispatches to the event path.
+ *
+ * Idempotent: existing handles are detected (readProductByHandle /
+ * listProductFamilies / findComponent) and left untouched, so re-running is safe.
  *
  * Run with:  npm run seed --workspace server
  */
@@ -103,16 +116,91 @@ async function ensureProduct(familyKey: string, plan: PlanSeed): Promise<void> {
   console.log(`+ Created product "${plan.handle}" (id ${p.id}, ${(plan.priceInCents / 100).toFixed(2)}/mo)`);
 }
 
+interface MeteredSeed {
+  handle: string;
+  name: string;
+  unitName: string;
+  /** Per-unit price in dollars (Maxio component prices are decimal dollars). */
+  unitPrice: string;
+}
+
+// Note: a component must live in the SAME product family as the products that
+// subscriptions use, or recording usage 404s. We therefore create components in
+// the products' actual family (derived from `basic`), not from FAMILY_HANDLE.
+// Handle: `consulting-minutes` is reserved site-wide on this test site from an
+// earlier era, and Maxio handles are permanently unique per site, so we use the
+// available `consulting-time` handle for the canonical metered component.
+const METERED_COMPONENTS: MeteredSeed[] = [
+  { handle: 'consulting-time', name: 'Consulting Time', unitName: 'minute', unitPrice: '2.00' },
+];
+
+/** The family that actually contains the products (where components must live). */
+async function resolveProductsFamilyId(fallbackFamilyId: number): Promise<number> {
+  try {
+    const basic = await productsController().readProductByHandle(PLANS[0]!.handle);
+    const id = basic.result?.product?.productFamily?.id;
+    if (id !== undefined) return id;
+  } catch {
+    // fall through to the fallback (fresh site)
+  }
+  return fallbackFamilyId;
+}
+
+async function ensureMeteredComponent(familyId: number, comp: MeteredSeed): Promise<void> {
+  const components = componentsController();
+
+  // Idempotency: find by handle across the site.
+  try {
+    const existing = await components.findComponent(comp.handle);
+    const c = existing.result?.component;
+    if (c?.id !== undefined) {
+      console.log(`✓ Component "${comp.handle}" already exists (id ${c.id}, kind ${c.kind}, family ${c.productFamilyId})`);
+      return;
+    }
+  } catch (err) {
+    if (!(err instanceof ApiError) || err.statusCode !== 404) {
+      if (err instanceof ApiError) {
+        throw new Error(`findComponent("${comp.handle}") failed (HTTP ${err.statusCode}): ${err.body}`);
+      }
+      throw err;
+    }
+  }
+
+  const body: CreateMeteredComponent = {
+    meteredComponent: {
+      name: comp.name,
+      handle: comp.handle,
+      unitName: comp.unitName,
+      pricingScheme: PricingScheme.PerUnit,
+      taxable: false,
+      prices: [{ startingQuantity: 1, unitPrice: comp.unitPrice }],
+    },
+  };
+  // createMeteredComponent requires the NUMERIC product family id.
+  const created = await components.createMeteredComponent(String(familyId), body);
+  const c = created.result?.component;
+  if (c?.id === undefined) throw new Error(`Component creation for "${comp.handle}" returned no id`);
+  console.log(`+ Created metered component "${comp.handle}" (id ${c.id}, family ${c.productFamilyId}, $${comp.unitPrice}/${comp.unitName})`);
+}
+
 async function main(): Promise<void> {
   console.log(`Seeding Maxio site "${config.maxio.siteSubdomain}" (${config.maxio.environment})…`);
-  await ensureProductFamily();
+  const ensuredFamilyId = await ensureProductFamily();
   const familyKey = `handle:${FAMILY_HANDLE}`;
   for (const plan of PLANS) {
     await ensureProduct(familyKey, plan);
   }
+  const componentFamilyId = await resolveProductsFamilyId(ensuredFamilyId);
+  for (const comp of METERED_COMPONENTS) {
+    await ensureMeteredComponent(componentFamilyId, comp);
+  }
   console.log('\nSeed complete. Plans:');
   for (const plan of PLANS) {
     console.log(`  • ${plan.handle.padEnd(6)} ${plan.name.padEnd(12)} $${(plan.priceInCents / 100).toFixed(2)}/mo`);
+  }
+  console.log('Components:');
+  for (const comp of METERED_COMPONENTS) {
+    console.log(`  • ${comp.handle.padEnd(18)} ${comp.name.padEnd(16)} $${comp.unitPrice}/${comp.unitName} (metered)`);
   }
 }
 

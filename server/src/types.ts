@@ -68,5 +68,23 @@ export interface SubscriptionResult {
   maxioUrl: string;
 }
 
+/** Normalised result of recording usage against a component (UC2). */
+export interface UsageResult {
+  componentHandle: string;
+  componentId: number;
+  componentKind: string;
+  unitName: string | null;
+  /** How the usage was recorded: a usage record (metered) or an event (EBB). */
+  recordedVia: 'usage' | 'event';
+  /** Quantity recorded by this call. */
+  recordedQuantity: number;
+  /** Sum of recorded usage in the current period, or null when not readable
+   * (e.g. event-based components return no usage history). */
+  periodTotal: number | null;
+  memo: string | null;
+  /** Id of the created usage record (metered path), if any. */
+  usageId: string | null;
+}
+
 /** Discriminated response status returned by every mutating route. */
 export type ApiStatus = 'ok' | 'maxio_failed' | 'invalid' | 'session_expired';
