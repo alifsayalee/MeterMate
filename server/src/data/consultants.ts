@@ -1,3 +1,6 @@
+// Import config for its side effect: this guarantees `.env` has been loaded
+// (dotenv runs at config module load) BEFORE we read process.env below.
+import '../config.js';
 import type { Consultant } from '../types.js';
 
 /**

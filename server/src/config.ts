@@ -1,10 +1,17 @@
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import * as dotenv from 'dotenv';
 
 /**
- * Typed environment loader. Reads the repo-root `.env` (one level up from
- * `server/`) once at module load and exposes a frozen, validated config object.
+ * Typed environment loader. Loads the repo-root `.env` once at module load and
+ * exposes a frozen, validated config object.
+ *
+ * Robust discovery: we walk upward from this module's own location (and, as a
+ * fallback, the current working directory) until we find a `.env`. Anchoring to
+ * the module location — via `import.meta.url`, which is correct in ESM where
+ * `__dirname` does not exist — makes loading independent of where the process is
+ * launched from and works the same under `tsx` (src/) and compiled `dist/`.
  *
  * Fail-fast philosophy: required secrets are validated lazily per subsystem
  * (Maxio / Slack) so the scaffold and `/api/health` boot even before every
@@ -12,15 +19,25 @@ import * as dotenv from 'dotenv';
  * error rather than silently passing `undefined` to an SDK.
  */
 
-const repoRoot = path.resolve(process.cwd(), '..');
-const envPath = path.resolve(repoRoot, '.env');
-if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath, override: false });
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+
+/** Walk up from `startDir` looking for the nearest `.env`. */
+function findEnvFile(startDir: string): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 8; i += 1) {
+    const candidate = path.join(dir, '.env');
+    if (fs.existsSync(candidate)) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break; // reached filesystem root
+    dir = parent;
+  }
+  return undefined;
 }
-// Also honour a server-local .env if present (does not override repo-root).
-const localEnvPath = path.resolve(process.cwd(), '.env');
-if (fs.existsSync(localEnvPath)) {
-  dotenv.config({ path: localEnvPath, override: false });
+
+// Prefer a .env found relative to this module; fall back to one near the cwd.
+const envPath = findEnvFile(moduleDir) ?? findEnvFile(process.cwd());
+if (envPath) {
+  dotenv.config({ path: envPath, override: false });
 }
 
 function optional(key: string): string | undefined {

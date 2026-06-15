@@ -1,6 +1,6 @@
 import type { ApiResponse } from 'slack-apimatic-sdk';
 import { requireSlackConfig } from '../config.js';
-import { authApi, chatApi, conversationsApi, usersApi } from '../slackClient.js';
+import { authApi, chatApi, conversationsApi } from '../slackClient.js';
 import type { Consultant } from '../types.js';
 import {
   buildEmailFallbackNote,
@@ -71,6 +71,36 @@ async function slackCall(
   }
 }
 
+const SLACK_API_BASE = 'https://slack.com/api';
+
+/**
+ * Call a Slack **GET** method with the bot token in the `Authorization: Bearer`
+ * header. Why bypass the SDK here: this SDK routes GET-method tokens through the
+ * URL query string (`req.query('token', …)`), and Slack rejects tokens supplied
+ * in query strings with `invalid_auth` (verified against the live API). The
+ * affected GETs we use are `users.lookupByEmail` and `conversations.list`; all
+ * POST methods (create/invite/postMessage) and `auth.test` use the token header
+ * correctly and stay on the SDK. Never throws — returns a normalized SlackResult.
+ */
+async function slackApiGet(
+  method: string,
+  params: Record<string, string | number | boolean | undefined>,
+): Promise<SlackResult> {
+  const qs = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) qs.set(key, String(value));
+  }
+  const url = `${SLACK_API_BASE}/${method}?${qs.toString()}`;
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token()}` } });
+    const json = (await res.json()) as Record<string, unknown>;
+    return toResult(json);
+  } catch (err) {
+    console.error(`[slack] ${method} request failed:`, err instanceof Error ? err.message : err);
+    return { ok: false, data: null, error: 'request_failed' };
+  }
+}
+
 function readNested(data: Record<string, unknown> | null, outer: string, inner: string): string | undefined {
   const obj = data?.[outer];
   if (obj && typeof obj === 'object' && inner in obj) {
@@ -105,11 +135,14 @@ export async function slackHealthCheck(): Promise<boolean> {
 
 /** Resolve a workspace email to a user id, or `null` if not a member. */
 async function lookupUserId(email: string): Promise<string | null> {
-  const res = await slackCall('users.lookupByEmail', () =>
-    usersApi().usersLookupByEmail(token(), email),
-  );
-  if (!res.ok) return null;
-  return readNested(res.data, 'user', 'id') ?? null;
+  const res = await slackApiGet('users.lookupByEmail', { email });
+  if (!res.ok) {
+    console.warn(`[slack] users.lookupByEmail("${email}") → not a member (slack error: ${res.error ?? 'unknown'})`);
+    return null;
+  }
+  const userId = readNested(res.data, 'user', 'id') ?? null;
+  console.log(`[slack] users.lookupByEmail("${email}") → user ${userId ?? '(no id in response)'}`);
+  return userId;
 }
 
 /** Find an existing private channel by exact name (name_taken → reuse). */
@@ -118,9 +151,12 @@ async function findChannelByName(
 ): Promise<{ channelId: string; channelName: string } | null> {
   let cursor: string | undefined;
   for (let page = 0; page < 10; page += 1) {
-    const res = await slackCall('conversations.list', () =>
-      conversationsApi().conversationsList(token(), true, 'private_channel', 200, cursor),
-    );
+    const res = await slackApiGet('conversations.list', {
+      types: 'private_channel',
+      limit: 200,
+      exclude_archived: true,
+      cursor,
+    });
     if (!res.ok) return null;
     const channels = res.data?.['channels'];
     if (Array.isArray(channels)) {
@@ -190,11 +226,14 @@ export async function ensureTxnChannel(input: EnsureChannelInput): Promise<Ensur
   if (created.ok) {
     channelId = readNested(created.data, 'channel', 'id') ?? null;
     channelName = readNested(created.data, 'channel', 'name') ?? desiredName;
+    console.log(`[slack] conversations.create "${desiredName}" → channel ${channelId}`);
   } else {
+    console.warn(`[slack] conversations.create "${desiredName}" not ok (error: ${created.error ?? 'unknown'}); looking up existing`);
     const reused = await findChannelByName(desiredName);
     if (reused) {
       channelId = reused.channelId;
       channelName = reused.channelName;
+      console.log(`[slack] reusing existing channel ${channelId} ("${channelName}")`);
     }
   }
 
@@ -215,12 +254,18 @@ export async function ensureTxnChannel(input: EnsureChannelInput): Promise<Ensur
 
   const inviteIds = [consultantUserId, clientUserId].filter((id): id is string => Boolean(id));
   if (inviteIds.length > 0) {
+    console.log(`[slack] conversations.invite → channel ${channelId}, users [${inviteIds.join(', ')}]`);
     const invited = await slackCall('conversations.invite', () =>
       conversationsApi().conversationsInvite(token(), channelId!, inviteIds.join(',')),
     );
-    if (!invited.ok) {
+    if (invited.ok) {
+      console.log(`[slack] invite ok for channel ${channelId}`);
+    } else {
+      console.warn(`[slack] conversations.invite not ok (error: ${invited.error ?? 'unknown'})`);
       notes.push('One or more invites could not be completed; parties notified by email.');
     }
+  } else {
+    console.log('[slack] no workspace members resolved to invite (both parties via email)');
   }
 
   // 4. Post the channel-opened banner (+ any email-fallback notes).
