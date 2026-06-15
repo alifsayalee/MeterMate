@@ -1,4 +1,5 @@
 import type {
+  InvoiceResult,
   LifecycleResult,
   PlanChangePreview,
   PlanChangeResult,
@@ -191,6 +192,28 @@ export function buildLifecycleDone(args: { result: LifecycleResult }): SlackBloc
     fields(fieldPairs),
     linkButton('View in Maxio', result.maxioUrl),
   ];
+}
+
+/** UC5 in-progress message. */
+export function buildInvoiceProgress(): SlackBlock[] {
+  return [section(':receipt: *Issuing invoice*…')];
+}
+
+/** UC5 completion message with amount due, due date, and a Pay Invoice button. */
+export function buildInvoiceIssued(args: { result: InvoiceResult }): SlackBlock[] {
+  const { result } = args;
+  const fieldPairs: Array<[string, string]> = [
+    ['Invoice', result.invoiceNumber ?? result.invoiceUid],
+    ['Amount due', `$${result.dueAmount}`],
+    ['Due date', result.dueDate ?? 'on issue'],
+    ['Status', result.status],
+  ];
+  if (result.emailed && result.recipientEmail) {
+    fieldPairs.push(['Emailed to', result.recipientEmail]);
+  }
+  const blocks: SlackBlock[] = [header(':receipt: Invoice issued'), fields(fieldPairs)];
+  if (result.publicUrl) blocks.push(linkButton('Pay Invoice', result.publicUrl));
+  return blocks;
 }
 
 /** Generic failure message for any use case. */

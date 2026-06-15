@@ -140,5 +140,30 @@ export interface LifecycleResult {
   maxioUrl: string;
 }
 
+// ── UC5 — Invoice Issue + Send ───────────────────────────────────────────────
+
+/** A custom invoice line item (unit price in dollars). */
+export interface InvoiceLineItemInput {
+  title: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+/** Normalised result of issuing (and optionally emailing) an invoice. */
+export interface InvoiceResult {
+  invoiceUid: string;
+  invoiceNumber: string | null;
+  status: string;
+  /** Decimal-string amounts as Maxio returns them (e.g. "299.00"). */
+  totalAmount: string;
+  dueAmount: string;
+  dueDate: string | null;
+  /** Hosted public payment URL (the "Pay Invoice" link). */
+  publicUrl: string | null;
+  emailed: boolean;
+  recipientEmail: string | null;
+  maxioUrl: string;
+}
+
 /** Discriminated response status returned by every mutating route. */
 export type ApiStatus = 'ok' | 'maxio_failed' | 'invalid' | 'session_expired';
