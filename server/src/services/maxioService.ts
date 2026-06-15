@@ -6,14 +6,26 @@ import {
   type CreateUsageRequest,
   type EBBEvent,
   ErrorListResponseError,
+  type SubscriptionMigrationPreviewRequest,
+  type SubscriptionProductMigrationRequest,
+  type UpdateSubscriptionRequest,
 } from '@maxio-com/advanced-billing-sdk';
 import {
   componentsController,
   maxioAdminBaseUrl,
+  productsController,
   subscriptionComponentsController,
+  subscriptionProductsController,
   subscriptionsController,
 } from '../maxioClient.js';
-import type { CollectionMethodValue, SubscriptionResult, UsageResult } from '../types.js';
+import type {
+  CollectionMethodValue,
+  PlanChangePreview,
+  PlanChangeResult,
+  PlanChangeTiming,
+  SubscriptionResult,
+  UsageResult,
+} from '../types.js';
 
 /**
  * Maxio operations, one function per use case. No Express/Slack imports — pure
@@ -295,5 +307,131 @@ export async function recordUsage(input: RecordUsageInput): Promise<UsageResult>
     periodTotal,
     memo: usage.memo ?? input.memo ?? null,
     usageId: usage.id !== undefined ? usage.id.toString() : null,
+  };
+}
+
+// ── UC3 — Plan Change (proration preview + commit) ───────────────────────────
+
+/** Read a product's display name by handle (best-effort; null on failure). */
+async function readProductName(handle: string): Promise<string | null> {
+  try {
+    const res = await productsController().readProductByHandle(handle);
+    return res.result?.product?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export interface PlanChangePreviewInput {
+  subscriptionId: number;
+  targetHandle: string;
+}
+
+/**
+ * UC3 (preview) — compute the prorated cost of moving the subscription to the
+ * target plan now, WITHOUT committing. Uses the same proration mechanism the
+ * "prorate" commit applies, so the preview reflects the real charge.
+ */
+export async function previewPlanChange(input: PlanChangePreviewInput): Promise<PlanChangePreview> {
+  const body: SubscriptionMigrationPreviewRequest = {
+    migration: { productHandle: input.targetHandle, includeCoupons: true, preservePeriod: false },
+  };
+
+  let response;
+  try {
+    response = await subscriptionProductsController().previewSubscriptionProductMigration(
+      input.subscriptionId,
+      body,
+    );
+  } catch (error) {
+    throw summarizeMaxioError(error);
+  }
+
+  const migration = response.result?.migration;
+  if (!migration) throw new MaxioServiceError('Maxio returned no migration preview');
+
+  return {
+    targetHandle: input.targetHandle,
+    proratedAdjustmentInCents: toCents(migration.proratedAdjustmentInCents),
+    chargeInCents: toCents(migration.chargeInCents),
+    paymentDueInCents: toCents(migration.paymentDueInCents),
+    creditAppliedInCents: toCents(migration.creditAppliedInCents),
+  };
+}
+
+export interface ApplyPlanChangeInput {
+  subscriptionId: number;
+  targetHandle: string;
+  timing: PlanChangeTiming;
+}
+
+/**
+ * UC3 (commit) — apply the plan change.
+ *  - `prorate`: migrate the subscription NOW, charging the prorated delta
+ *    immediately (the same mechanism the preview reflects).
+ *  - `at-renewal`: schedule a delayed, NON-prorated product change that takes
+ *    effect at the next renewal (productChangeDelayed).
+ */
+export async function applyPlanChange(input: ApplyPlanChangeInput): Promise<PlanChangeResult> {
+  // Capture the current plan name before the change (for old → new reporting).
+  let oldPlanName = 'current plan';
+  try {
+    const before = await subscriptionsController().readSubscription(input.subscriptionId);
+    oldPlanName = before.result?.subscription?.product?.name ?? oldPlanName;
+  } catch {
+    // Non-fatal: we'll still report the change with a generic old-plan label.
+  }
+
+  const maxioUrl = `${maxioAdminBaseUrl()}/subscriptions/${input.subscriptionId}`;
+
+  if (input.timing === 'prorate') {
+    const body: SubscriptionProductMigrationRequest = {
+      migration: { productHandle: input.targetHandle, includeCoupons: true, preservePeriod: false },
+    };
+    let response;
+    try {
+      response = await subscriptionProductsController().migrateSubscriptionProduct(
+        input.subscriptionId,
+        body,
+      );
+    } catch (error) {
+      throw summarizeMaxioError(error);
+    }
+    const sub = response.result?.subscription;
+    return {
+      timing: 'prorate',
+      oldPlanName,
+      newPlanName: sub?.product?.name ?? input.targetHandle,
+      newPlanHandle: input.targetHandle,
+      state: sub?.state ?? 'unknown',
+      scheduled: false,
+      effectiveDate: null,
+      paymentDueInCents: null,
+      maxioUrl,
+    };
+  }
+
+  // at-renewal → delayed, non-prorated product change.
+  const body: UpdateSubscriptionRequest = {
+    subscription: { productHandle: input.targetHandle, productChangeDelayed: true },
+  };
+  let response;
+  try {
+    response = await subscriptionsController().updateSubscription(input.subscriptionId, body);
+  } catch (error) {
+    throw summarizeMaxioError(error);
+  }
+  const sub = response.result?.subscription;
+  const newPlanName = (await readProductName(input.targetHandle)) ?? input.targetHandle;
+  return {
+    timing: 'at-renewal',
+    oldPlanName,
+    newPlanName,
+    newPlanHandle: input.targetHandle,
+    state: sub?.state ?? 'unknown',
+    scheduled: true,
+    effectiveDate: sub?.currentPeriodEndsAt ?? null,
+    paymentDueInCents: null,
+    maxioUrl,
   };
 }

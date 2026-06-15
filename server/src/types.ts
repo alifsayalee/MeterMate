@@ -86,5 +86,39 @@ export interface UsageResult {
   usageId: string | null;
 }
 
+// ── UC3 — Plan Change ────────────────────────────────────────────────────────
+
+/** `prorate` = change now with proration; `at-renewal` = deferred, non-prorated. */
+export type PlanChangeTiming = 'prorate' | 'at-renewal';
+
+/** Prorated cost of moving the subscription to a target plan now (preview). */
+export interface PlanChangePreview {
+  targetHandle: string;
+  /** Prorated credit for the unused portion of the current plan. */
+  proratedAdjustmentInCents: number;
+  /** Charge for the new plan over the remaining period. */
+  chargeInCents: number;
+  /** Net amount due immediately (charge minus credit). */
+  paymentDueInCents: number;
+  /** Credit applied from the current plan. */
+  creditAppliedInCents: number;
+}
+
+/** Result of committing a plan change. */
+export interface PlanChangeResult {
+  timing: PlanChangeTiming;
+  oldPlanName: string;
+  newPlanName: string;
+  newPlanHandle: string;
+  state: string;
+  /** Whether the change is scheduled for the next renewal (at-renewal) vs now. */
+  scheduled: boolean;
+  /** Effective date: next renewal for at-renewal; null = immediate for prorate. */
+  effectiveDate: string | null;
+  /** Net amount charged now (prorate path); null for at-renewal. */
+  paymentDueInCents: number | null;
+  maxioUrl: string;
+}
+
 /** Discriminated response status returned by every mutating route. */
 export type ApiStatus = 'ok' | 'maxio_failed' | 'invalid' | 'session_expired';

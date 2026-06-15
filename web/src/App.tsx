@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import { BookForm } from './components/client/BookForm.js';
 import { UsageForm } from './components/client/UsageForm.js';
+import { PlanChangeForm } from './components/client/PlanChangeForm.js';
 
-type Tab = 'book' | 'usage';
+type Tab = 'book' | 'usage' | 'plan';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'book', label: 'Book & subscribe' },
   { id: 'usage', label: 'Report usage' },
+  { id: 'plan', label: 'Change plan' },
 ];
 
 /**
@@ -49,7 +51,9 @@ export function App() {
         </nav>
 
         <section style={{ padding: 24, border: '1px solid #e5e5e5', borderRadius: 12 }}>
-          {tab === 'book' ? <BookForm /> : <UsageForm />}
+          {tab === 'book' && <BookForm />}
+          {tab === 'usage' && <UsageForm />}
+          {tab === 'plan' && <PlanChangeForm />}
         </section>
       </main>
     </div>
