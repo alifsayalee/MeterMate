@@ -7,6 +7,7 @@ import {
   SubscriptionComponentsController,
   SubscriptionProductsController,
   SubscriptionsController,
+  SubscriptionStatusController,
 } from '@maxio-com/advanced-billing-sdk';
 import { config, requireMaxioConfig } from './config.js';
 
@@ -52,6 +53,10 @@ export function subscriptionComponentsController(): SubscriptionComponentsContro
 
 export function subscriptionProductsController(): SubscriptionProductsController {
   return new SubscriptionProductsController(getClient());
+}
+
+export function subscriptionStatusController(): SubscriptionStatusController {
+  return new SubscriptionStatusController(getClient());
 }
 
 /** Base URL for deep links into the Maxio admin UI for this site. */

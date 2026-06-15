@@ -1,4 +1,5 @@
 import type {
+  LifecycleResult,
   PlanChangePreview,
   PlanChangeResult,
   SubscriptionResult,
@@ -160,6 +161,33 @@ export function buildPlanChanged(args: { result: PlanChangeResult }): SlackBlock
   }
   return [
     header(':arrows_counterclockwise: Plan changed'),
+    fields(fieldPairs),
+    linkButton('View in Maxio', result.maxioUrl),
+  ];
+}
+
+/** UC4 in-progress message. */
+export function buildLifecycleProgress(actionLabel: string): SlackBlock[] {
+  return [section(`:vertical_traffic_light: *${actionLabel}* in progress…`)];
+}
+
+/** UC4 completion message — the state transition + reason + effective date. */
+export function buildLifecycleDone(args: { result: LifecycleResult }): SlackBlock[] {
+  const { result } = args;
+  const transition = `${result.previousState} → ${result.newState}`;
+  const fieldPairs: Array<[string, string]> = [['Transition', transition]];
+  if (result.action === 'cancel') {
+    fieldPairs.push([
+      'Cancellation',
+      result.cancelAtEndOfPeriod ? 'At end of period' : 'Immediate',
+    ]);
+  }
+  if (result.effectiveDate) {
+    fieldPairs.push(['Effective', new Date(result.effectiveDate).toUTCString()]);
+  }
+  if (result.reasonCode) fieldPairs.push(['Reason', result.reasonCode]);
+  return [
+    header(`:vertical_traffic_light: ${transition}`),
     fields(fieldPairs),
     linkButton('View in Maxio', result.maxioUrl),
   ];

@@ -120,5 +120,25 @@ export interface PlanChangeResult {
   maxioUrl: string;
 }
 
+// ── UC4 — Lifecycle Control ──────────────────────────────────────────────────
+
+export type LifecycleAction = 'pause' | 'resume' | 'cancel' | 'reactivate';
+export type CancelType = 'immediate' | 'end-of-period';
+
+/** Result of a lifecycle action (the state transition + effective timing). */
+export interface LifecycleResult {
+  action: LifecycleAction;
+  previousState: string;
+  newState: string;
+  /** Only meaningful when action === 'cancel'. */
+  cancelType: CancelType | null;
+  /** True when an end-of-period (delayed) cancellation is scheduled. */
+  cancelAtEndOfPeriod: boolean;
+  /** Effective date for a scheduled action (delayed cancel), else null (now). */
+  effectiveDate: string | null;
+  reasonCode: string | null;
+  maxioUrl: string;
+}
+
 /** Discriminated response status returned by every mutating route. */
 export type ApiStatus = 'ok' | 'maxio_failed' | 'invalid' | 'session_expired';
