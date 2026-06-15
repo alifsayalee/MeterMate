@@ -1,4 +1,9 @@
-import type { SubscriptionResult, UsageResult } from '../types.js';
+import type {
+  PlanChangePreview,
+  PlanChangeResult,
+  SubscriptionResult,
+  UsageResult,
+} from '../types.js';
 
 /**
  * Pure Block Kit builders. Each returns a Slack `blocks` array and touches no
@@ -108,6 +113,55 @@ export function buildUsageRecorded(args: { result: UsageResult }): SlackBlock[] 
     header(':white_check_mark: Usage recorded'),
     fields(fieldPairs),
     context('Accrues to the next invoice.'),
+  ];
+}
+
+/** UC3 preview message — the prorated delta before committing. */
+export function buildPlanChangePreview(args: {
+  targetHandle: string;
+  timing: string;
+  preview: PlanChangePreview;
+}): SlackBlock[] {
+  const { preview } = args;
+  return [
+    header(':mag: Plan change preview'),
+    fields([
+      ['Target plan', args.targetHandle],
+      ['Timing', args.timing === 'prorate' ? 'Prorate now' : 'At next renewal'],
+      ['Prorated charge', formatCents(preview.chargeInCents)],
+      ['Credit applied', formatCents(preview.creditAppliedInCents)],
+      ['Due now', formatCents(preview.paymentDueInCents)],
+    ]),
+    context(
+      args.timing === 'prorate'
+        ? 'This amount will be charged immediately on confirm.'
+        : 'At-renewal changes are not prorated; the full new price applies next period.',
+    ),
+  ];
+}
+
+/** UC3 completion message — old → new with effective date + proration. */
+export function buildPlanChanged(args: { result: PlanChangeResult }): SlackBlock[] {
+  const { result } = args;
+  const effective = result.scheduled
+    ? result.effectiveDate
+      ? `Next renewal (${new Date(result.effectiveDate).toUTCString()})`
+      : 'Next renewal'
+    : 'Immediately';
+  const fieldPairs: Array<[string, string]> = [
+    ['From', result.oldPlanName],
+    ['To', result.newPlanName],
+    ['Timing', result.scheduled ? 'At next renewal (no proration)' : 'Prorated now'],
+    ['Effective', effective],
+    ['State', result.state],
+  ];
+  if (result.paymentDueInCents !== null) {
+    fieldPairs.push(['Charged now', formatCents(result.paymentDueInCents)]);
+  }
+  return [
+    header(':arrows_counterclockwise: Plan changed'),
+    fields(fieldPairs),
+    linkButton('View in Maxio', result.maxioUrl),
   ];
 }
 
