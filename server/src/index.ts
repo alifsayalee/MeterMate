@@ -7,6 +7,7 @@ import { slackHealthCheck } from './services/slackService.js';
 import { bookRouter } from './routes/book.js';
 import { usageRouter } from './routes/usage.js';
 import { planChangeRouter } from './routes/planChange.js';
+import { lifecycleRouter } from './routes/lifecycle.js';
 import { metaRouter } from './routes/meta.js';
 
 const app = express();
@@ -37,6 +38,7 @@ app.use(metaRouter);
 app.use(bookRouter);
 app.use(usageRouter);
 app.use(planChangeRouter);
+app.use(lifecycleRouter);
 
 // Centralised error handler — never leak stack traces to clients.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

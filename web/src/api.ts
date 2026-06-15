@@ -284,3 +284,71 @@ export async function commitPlanChange(req: PlanChangeRequest): Promise<CommitRe
   persistSession(data as never);
   return data;
 }
+
+// ── UC4 — Lifecycle Control ──────────────────────────────────────────────────
+
+export type LifecycleAction = 'pause' | 'resume' | 'cancel' | 'reactivate';
+export type CancelType = 'immediate' | 'end-of-period';
+
+export interface LifecycleResult {
+  action: LifecycleAction;
+  previousState: string;
+  newState: string;
+  cancelType: CancelType | null;
+  cancelAtEndOfPeriod: boolean;
+  effectiveDate: string | null;
+  reasonCode: string | null;
+  maxioUrl: string;
+}
+
+export interface LifecycleRequest {
+  txnRef: string;
+  action: LifecycleAction;
+  cancelType?: CancelType;
+  reasonCode?: string;
+}
+
+export interface LifecycleOk {
+  status: 'ok';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  result: LifecycleResult;
+}
+interface LifecycleInvalid {
+  status: 'invalid';
+  errors: Array<{ path: string; message: string }>;
+}
+interface LifecycleSessionExpired {
+  status: 'session_expired';
+  sessionId: string;
+  txnId?: string;
+  error: string;
+}
+interface LifecycleMaxioFailed {
+  status: 'maxio_failed';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  error: string;
+}
+export type LifecycleResponse =
+  | LifecycleOk
+  | LifecycleInvalid
+  | LifecycleSessionExpired
+  | LifecycleMaxioFailed;
+
+/** Dispatch a lifecycle action (pause / resume / cancel / reactivate). */
+export async function controlLifecycle(req: LifecycleRequest): Promise<LifecycleResponse> {
+  const sessionId = getSessionId();
+  const res = await fetch('/api/lifecycle', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+  const data = (await res.json()) as LifecycleResponse;
+  persistSession(data as never);
+  return data;
+}

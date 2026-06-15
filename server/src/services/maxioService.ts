@@ -6,6 +6,7 @@ import {
   type CreateUsageRequest,
   type EBBEvent,
   ErrorListResponseError,
+  type CancellationRequest,
   type SubscriptionMigrationPreviewRequest,
   type SubscriptionProductMigrationRequest,
   type UpdateSubscriptionRequest,
@@ -16,10 +17,14 @@ import {
   productsController,
   subscriptionComponentsController,
   subscriptionProductsController,
+  subscriptionStatusController,
   subscriptionsController,
 } from '../maxioClient.js';
 import type {
+  CancelType,
   CollectionMethodValue,
+  LifecycleAction,
+  LifecycleResult,
   PlanChangePreview,
   PlanChangeResult,
   PlanChangeTiming,
@@ -434,4 +439,100 @@ export async function applyPlanChange(input: ApplyPlanChangeInput): Promise<Plan
     paymentDueInCents: null,
     maxioUrl,
   };
+}
+
+// ── UC4 — Lifecycle Control ──────────────────────────────────────────────────
+
+/** Read the current state of a subscription (best-effort; 'unknown' on failure). */
+async function readSubscriptionState(subscriptionId: number): Promise<string> {
+  try {
+    const res = await subscriptionsController().readSubscription(subscriptionId);
+    return res.result?.subscription?.state ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+export interface ControlLifecycleInput {
+  subscriptionId: number;
+  action: LifecycleAction;
+  /** Required semantics only for `cancel`; defaults to 'immediate'. */
+  cancelType?: CancelType;
+  reasonCode?: string;
+}
+
+/**
+ * UC4 — dispatch a lifecycle action to its Maxio operation:
+ *  - pause     → pauseSubscription (→ on_hold)
+ *  - resume    → resumeSubscription (→ active)
+ *  - cancel/immediate     → cancelSubscription with no schedule (→ canceled)
+ *  - cancel/end-of-period → cancelSubscription with cancelAtEndOfPeriod (delayed)
+ *  - reactivate → reactivateSubscription (→ active)
+ * Reads the prior state first so the result can report the transition.
+ */
+export async function controlLifecycle(input: ControlLifecycleInput): Promise<LifecycleResult> {
+  const previousState = await readSubscriptionState(input.subscriptionId);
+  const status = subscriptionStatusController();
+  const maxioUrl = `${maxioAdminBaseUrl()}/subscriptions/${input.subscriptionId}`;
+
+  const base = {
+    action: input.action,
+    previousState,
+    cancelType: null as CancelType | null,
+    cancelAtEndOfPeriod: false,
+    effectiveDate: null as string | null,
+    reasonCode: input.reasonCode ?? null,
+    maxioUrl,
+  };
+
+  try {
+    switch (input.action) {
+      case 'pause': {
+        const res = await status.pauseSubscription(input.subscriptionId);
+        return { ...base, newState: res.result?.subscription?.state ?? 'on_hold' };
+      }
+      case 'resume': {
+        const res = await status.resumeSubscription(input.subscriptionId);
+        return { ...base, newState: res.result?.subscription?.state ?? 'active' };
+      }
+      case 'reactivate': {
+        const res = await status.reactivateSubscription(input.subscriptionId);
+        return { ...base, newState: res.result?.subscription?.state ?? 'active' };
+      }
+      case 'cancel': {
+        const cancelType: CancelType = input.cancelType ?? 'immediate';
+        if (cancelType === 'end-of-period') {
+          const body: CancellationRequest = {
+            subscription: {
+              cancelAtEndOfPeriod: true,
+              ...(input.reasonCode ? { reasonCode: input.reasonCode } : {}),
+            },
+          };
+          const res = await status.cancelSubscription(input.subscriptionId, body);
+          const sub = res.result?.subscription;
+          return {
+            ...base,
+            cancelType,
+            newState: sub?.state ?? 'active',
+            cancelAtEndOfPeriod: sub?.cancelAtEndOfPeriod === true,
+            effectiveDate: sub?.delayedCancelAt ?? null,
+          };
+        }
+        // immediate cancel: omit schedule fields entirely.
+        const body: CancellationRequest | undefined = input.reasonCode
+          ? { subscription: { reasonCode: input.reasonCode } }
+          : undefined;
+        const res = await status.cancelSubscription(input.subscriptionId, body);
+        return { ...base, cancelType, newState: res.result?.subscription?.state ?? 'canceled' };
+      }
+      default: {
+        // Exhaustiveness guard.
+        const _never: never = input.action;
+        throw new MaxioServiceError(`Unsupported lifecycle action "${String(_never)}"`);
+      }
+    }
+  } catch (error) {
+    if (error instanceof MaxioServiceError) throw error;
+    throw summarizeMaxioError(error);
+  }
 }

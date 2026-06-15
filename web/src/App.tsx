@@ -2,13 +2,15 @@ import { useState } from 'react';
 import { BookForm } from './components/client/BookForm.js';
 import { UsageForm } from './components/client/UsageForm.js';
 import { PlanChangeForm } from './components/client/PlanChangeForm.js';
+import { LifecycleForm } from './components/client/LifecycleForm.js';
 
-type Tab = 'book' | 'usage' | 'plan';
+type Tab = 'book' | 'usage' | 'plan' | 'lifecycle';
 
 const TABS: Array<{ id: Tab; label: string }> = [
   { id: 'book', label: 'Book & subscribe' },
   { id: 'usage', label: 'Report usage' },
   { id: 'plan', label: 'Change plan' },
+  { id: 'lifecycle', label: 'Lifecycle' },
 ];
 
 /**
@@ -54,6 +56,7 @@ export function App() {
           {tab === 'book' && <BookForm />}
           {tab === 'usage' && <UsageForm />}
           {tab === 'plan' && <PlanChangeForm />}
+          {tab === 'lifecycle' && <LifecycleForm />}
         </section>
       </main>
     </div>
