@@ -1,4 +1,5 @@
 import type {
+  DigestResult,
   InvoiceResult,
   LifecycleResult,
   PlanChangePreview,
@@ -214,6 +215,26 @@ export function buildInvoiceIssued(args: { result: InvoiceResult }): SlackBlock[
   const blocks: SlackBlock[] = [header(':receipt: Invoice issued'), fields(fieldPairs)];
   if (result.publicUrl) blocks.push(linkButton('Pay Invoice', result.publicUrl));
   return blocks;
+}
+
+/** UC6 — per-consultant billing digest. */
+export function buildDigest(args: { result: DigestResult }): SlackBlock[] {
+  const { result } = args;
+  return [
+    header(':chart_with_upwards_trend: Billing digest'),
+    context(`Consultant *${result.consultantName}* · last ${result.windowDays} days`),
+    fields([
+      ['Active subscriptions', String(result.activeCount)],
+      ['MRR', `${formatCents(result.mrrInCents)}/mo`],
+      ['Total subscriptions', String(result.totalSubscriptions)],
+      ['New signups', String(result.newSignups)],
+      ['Churned', String(result.churned)],
+      ['Overdue invoices', String(result.overdueInvoices)],
+    ]),
+    context(
+      ':information_source: Reporting data is for reconciliation, not real-time confirmation — counts may lag live state slightly.',
+    ),
+  ];
 }
 
 /** Generic failure message for any use case. */

@@ -437,3 +437,61 @@ export async function issueInvoice(req: InvoiceRequest): Promise<InvoiceResponse
   persistSession(data as never);
   return data;
 }
+
+// ── UC6 — Billing Activity Digest (admin) ────────────────────────────────────
+
+export interface DigestResult {
+  consultantId: string;
+  consultantName: string;
+  windowDays: number;
+  totalSubscriptions: number;
+  activeCount: number;
+  mrrInCents: number;
+  newSignups: number;
+  churned: number;
+  overdueInvoices: number;
+  generatedAt: string;
+}
+
+export interface DigestRequest {
+  consultantId: string;
+  windowDays?: number;
+}
+
+export interface DigestOk {
+  status: 'ok';
+  sessionId: string;
+  channelId: string | null;
+  channelName: string | null;
+  notes: string[];
+  digest: DigestResult;
+}
+interface DigestInvalid {
+  status: 'invalid';
+  errors: Array<{ path: string; message: string }>;
+}
+interface DigestMaxioFailed {
+  status: 'maxio_failed';
+  sessionId: string;
+  error: string;
+}
+interface DigestUnauthorized {
+  status: 'unauthorized';
+  error: string;
+}
+export type DigestResponse = DigestOk | DigestInvalid | DigestMaxioFailed | DigestUnauthorized;
+
+/** Build + post a per-consultant billing digest. Admin-only (Basic auth). */
+export async function runDigest(req: DigestRequest): Promise<DigestResponse> {
+  const auth = basicAuthHeader();
+  if (!auth) return { status: 'unauthorized', error: 'Admin login required' };
+  const sessionId = getSessionId();
+  const res = await fetch('/api/digest', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: auth },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+  const data = (await res.json()) as DigestResponse;
+  persistSession(data as never);
+  return data;
+}

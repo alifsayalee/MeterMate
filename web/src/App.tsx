@@ -5,10 +5,12 @@ import { PlanChangeForm } from './components/client/PlanChangeForm.js';
 import { LifecycleForm } from './components/client/LifecycleForm.js';
 import { AdminLogin } from './components/admin/AdminLogin.js';
 import { InvoiceForm } from './components/admin/InvoiceForm.js';
+import { ActivityPanel } from './components/admin/ActivityPanel.js';
 import { clearAdminCreds, getAdminCreds } from './admin.js';
 
 type Role = 'client' | 'admin';
 type ClientTab = 'book' | 'usage' | 'plan' | 'lifecycle';
+type AdminTab = 'invoice' | 'activity';
 
 const CLIENT_TABS: Array<{ id: ClientTab; label: string }> = [
   { id: 'book', label: 'Book & subscribe' },
@@ -28,9 +30,11 @@ function pill(active: boolean): React.CSSProperties {
 export function App() {
   const [role, setRole] = useState<Role>('client');
   const [clientTab, setClientTab] = useState<ClientTab>('book');
+  const [adminTab, setAdminTab] = useState<AdminTab>('invoice');
   // Bumped on admin login/logout to re-evaluate getAdminCreds().
   const [adminVersion, setAdminVersion] = useState(0);
   const adminAuthed = getAdminCreds() !== null;
+  const onAdminUnauthorized = () => { clearAdminCreds(); setAdminVersion((v) => v + 1); };
 
   return (
     <div style={{ fontFamily: 'system-ui, sans-serif', color: '#1a1a1a' }}>
@@ -64,13 +68,19 @@ export function App() {
           <section style={{ padding: 24, border: '1px solid #e5e5e5', borderRadius: 12 }}>
             {adminAuthed ? (
               <>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                  <button onClick={() => { clearAdminCreds(); setAdminVersion((v) => v + 1); }}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <nav style={{ display: 'flex', gap: 8 }}>
+                    <button onClick={() => setAdminTab('invoice')} style={pill(adminTab === 'invoice')}>Issue invoice</button>
+                    <button onClick={() => setAdminTab('activity')} style={pill(adminTab === 'activity')}>Activity digest</button>
+                  </nav>
+                  <button onClick={onAdminUnauthorized}
                     style={{ padding: '4px 10px', fontSize: 12, border: '1px solid #ddd', borderRadius: 6, background: '#fff', cursor: 'pointer' }}>
                     Sign out
                   </button>
                 </div>
-                <InvoiceForm key={adminVersion} onUnauthorized={() => { clearAdminCreds(); setAdminVersion((v) => v + 1); }} />
+                {adminTab === 'invoice'
+                  ? <InvoiceForm key={`inv-${adminVersion}`} onUnauthorized={onAdminUnauthorized} />
+                  : <ActivityPanel key={`act-${adminVersion}`} onUnauthorized={onAdminUnauthorized} />}
               </>
             ) : (
               <AdminLogin onLoggedIn={() => setAdminVersion((v) => v + 1)} />

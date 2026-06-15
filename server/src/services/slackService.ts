@@ -285,6 +285,68 @@ export async function ensureTxnChannel(input: EnsureChannelInput): Promise<Ensur
   return { channelId, channelName, created: true, notes };
 }
 
+/** Per-consultant digest channel cache (id by consultant id), for reuse. */
+const digestChannels = new Map<string, { channelId: string; channelName: string }>();
+
+export interface DigestChannelResult {
+  channelId: string | null;
+  channelName: string | null;
+  notes: string[];
+}
+
+/**
+ * UC6 — ensure a per-consultant digest channel (`digest-<consultant>`): reuse if
+ * known, else create the private channel and invite the consultant. The digest
+ * is posted here (not in any transaction channel). Never throws.
+ */
+export async function ensureDigestChannel(consultant: Consultant): Promise<DigestChannelResult> {
+  const notes: string[] = [];
+  const cached = digestChannels.get(consultant.id);
+  if (cached) return { ...cached, notes };
+
+  const desiredName = `digest-${slug(consultant.id)}`.slice(0, 80);
+
+  let channelId: string | null = null;
+  let channelName = desiredName;
+  const created = await slackCall('conversations.create', () =>
+    conversationsApi().conversationsCreate(token(), desiredName, true),
+  );
+  if (created.ok) {
+    channelId = readNested(created.data, 'channel', 'id') ?? null;
+    channelName = readNested(created.data, 'channel', 'name') ?? desiredName;
+    console.log(`[slack] digest channel created "${desiredName}" → ${channelId}`);
+  } else {
+    const reused = await findChannelByName(desiredName);
+    if (reused) {
+      channelId = reused.channelId;
+      channelName = reused.channelName;
+      console.log(`[slack] reusing digest channel ${channelId} ("${channelName}")`);
+    }
+  }
+
+  if (!channelId) {
+    notes.push('Digest channel could not be created.');
+    return { channelId: null, channelName: null, notes };
+  }
+
+  // Invite the consultant if they're a workspace member.
+  const consultantUserId = await lookupUserId(consultant.email);
+  if (consultantUserId) {
+    const invited = await slackCall('conversations.invite', () =>
+      conversationsApi().conversationsInvite(token(), channelId!, consultantUserId),
+    );
+    if (!invited.ok && invited.error !== 'already_in_channel') {
+      notes.push(`Consultant ${consultant.name} could not be invited (${invited.error ?? 'unknown'}).`);
+    }
+  } else {
+    notes.push(`Consultant ${consultant.name} is not a workspace member; digest visible to the bot only.`);
+  }
+
+  const result = { channelId, channelName };
+  digestChannels.set(consultant.id, result);
+  return { ...result, notes };
+}
+
 /**
  * Post a Block Kit message to a channel. Returns true on success. Never throws —
  * a failed post is logged but does not affect the billing result.

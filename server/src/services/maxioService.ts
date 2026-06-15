@@ -6,6 +6,7 @@ import {
   type CreateUsageRequest,
   type EBBEvent,
   ErrorListResponseError,
+  InvoiceStatus,
   type CancellationRequest,
   type CreateInvoiceRequest,
   type SendInvoiceRequest,
@@ -26,6 +27,7 @@ import {
 import type {
   CancelType,
   CollectionMethodValue,
+  DigestResult,
   InvoiceLineItemInput,
   InvoiceResult,
   LifecycleAction,
@@ -621,5 +623,95 @@ export async function issueInvoice(input: IssueInvoiceInput): Promise<InvoiceRes
     emailed,
     recipientEmail: input.sendEmail ? (input.recipientEmail ?? null) : null,
     maxioUrl: `${maxioAdminBaseUrl()}/subscriptions/${input.subscriptionId}`,
+  };
+}
+
+// ── UC6 — Billing Activity Digest ────────────────────────────────────────────
+
+function isWithinWindow(timestamp: string | null | undefined, windowStartMs: number): boolean {
+  if (!timestamp) return false;
+  const t = Date.parse(timestamp);
+  return !Number.isNaN(t) && t >= windowStartMs;
+}
+
+/** Count outstanding/overdue invoices for one subscription (best-effort). */
+async function countOverdueInvoices(subscriptionId: number): Promise<number> {
+  let invoices;
+  try {
+    const res = await invoicesController().listInvoices({ subscriptionId, perPage: 200 });
+    invoices = res.result?.invoices ?? [];
+  } catch (error) {
+    console.warn('[uc6] listInvoices failed for', subscriptionId, error instanceof Error ? error.message : error);
+    return 0;
+  }
+  const nowMs = Date.now();
+  let overdue = 0;
+  for (const inv of invoices) {
+    const settled = inv.status === InvoiceStatus.Paid || inv.status === InvoiceStatus.Voided || inv.status === InvoiceStatus.Canceled;
+    const dueAmount = Number(inv.dueAmount ?? '0');
+    const pastDue = inv.dueDate ? Date.parse(`${inv.dueDate}T23:59:59Z`) < nowMs : false;
+    if (!settled && dueAmount > 0 && pastDue) overdue += 1;
+  }
+  return overdue;
+}
+
+export interface BuildDigestInput {
+  consultantId: string;
+  consultantName: string;
+  subscriptionIds: number[];
+  windowDays: number;
+}
+
+/**
+ * UC6 — aggregate a per-consultant billing digest from live Maxio data, scoped
+ * to the consultant's subscription ids (resolved by the caller from the
+ * transaction store, since Maxio itself has no consultant concept).
+ *
+ * Reporting is for reconciliation, not real-time confirmation — counts may lag
+ * live state slightly; the Slack message says so.
+ */
+export async function buildDigest(input: BuildDigestInput): Promise<DigestResult> {
+  const windowStartMs = Date.now() - input.windowDays * 24 * 60 * 60 * 1000;
+
+  let activeCount = 0;
+  let mrrInCents = 0;
+  let newSignups = 0;
+  let churned = 0;
+  let overdueInvoices = 0;
+
+  for (const subscriptionId of input.subscriptionIds) {
+    let subscription;
+    try {
+      const res = await subscriptionsController().readSubscription(subscriptionId);
+      subscription = res.result?.subscription;
+    } catch (error) {
+      // Skip subscriptions we can't read; the digest is best-effort reconciliation.
+      console.warn('[uc6] readSubscription failed for', subscriptionId, error instanceof Error ? error.message : error);
+      continue;
+    }
+    if (!subscription) continue;
+
+    if (subscription.state === 'active') {
+      activeCount += 1;
+      mrrInCents += toCents(subscription.productPriceInCents);
+    }
+    if (isWithinWindow(subscription.createdAt, windowStartMs)) newSignups += 1;
+    if (subscription.state === 'canceled' && isWithinWindow(subscription.canceledAt, windowStartMs)) {
+      churned += 1;
+    }
+    overdueInvoices += await countOverdueInvoices(subscriptionId);
+  }
+
+  return {
+    consultantId: input.consultantId,
+    consultantName: input.consultantName,
+    windowDays: input.windowDays,
+    totalSubscriptions: input.subscriptionIds.length,
+    activeCount,
+    mrrInCents,
+    newSignups,
+    churned,
+    overdueInvoices,
+    generatedAt: new Date().toISOString(),
   };
 }

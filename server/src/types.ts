@@ -165,5 +165,26 @@ export interface InvoiceResult {
   maxioUrl: string;
 }
 
+// ── UC6 — Billing Activity Digest ────────────────────────────────────────────
+
+/** Per-consultant billing summary aggregated from live Maxio data. */
+export interface DigestResult {
+  consultantId: string;
+  consultantName: string;
+  windowDays: number;
+  totalSubscriptions: number;
+  activeCount: number;
+  /** Sum of recurring amounts (cents) across active subscriptions. */
+  mrrInCents: number;
+  /** Subscriptions created within the window. */
+  newSignups: number;
+  /** Subscriptions canceled within the window. */
+  churned: number;
+  /** Count of outstanding/overdue invoices across the consultant's subs. */
+  overdueInvoices: number;
+  /** ISO timestamp the digest was generated. */
+  generatedAt: string;
+}
+
 /** Discriminated response status returned by every mutating route. */
 export type ApiStatus = 'ok' | 'maxio_failed' | 'invalid' | 'session_expired';

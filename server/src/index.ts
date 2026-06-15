@@ -9,6 +9,7 @@ import { usageRouter } from './routes/usage.js';
 import { planChangeRouter } from './routes/planChange.js';
 import { lifecycleRouter } from './routes/lifecycle.js';
 import { invoicesRouter } from './routes/invoices.js';
+import { digestRouter } from './routes/digest.js';
 import { metaRouter } from './routes/meta.js';
 
 const app = express();
@@ -41,6 +42,7 @@ app.use(usageRouter);
 app.use(planChangeRouter);
 app.use(lifecycleRouter);
 app.use(invoicesRouter);
+app.use(digestRouter);
 
 // Centralised error handler — never leak stack traces to clients.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
