@@ -1,8 +1,10 @@
 import {
   Client,
+  ComponentsController,
   Environment,
   ProductFamiliesController,
   ProductsController,
+  SubscriptionComponentsController,
   SubscriptionsController,
 } from '@maxio-com/advanced-billing-sdk';
 import { config, requireMaxioConfig } from './config.js';
@@ -37,6 +39,14 @@ export function productsController(): ProductsController {
 
 export function productFamiliesController(): ProductFamiliesController {
   return new ProductFamiliesController(getClient());
+}
+
+export function componentsController(): ComponentsController {
+  return new ComponentsController(getClient());
+}
+
+export function subscriptionComponentsController(): SubscriptionComponentsController {
+  return new SubscriptionComponentsController(getClient());
 }
 
 /** Base URL for deep links into the Maxio admin UI for this site. */

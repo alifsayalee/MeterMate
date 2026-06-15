@@ -6,6 +6,7 @@ import {
   type CollectionMethod,
   type Consultant,
 } from '../../api.js';
+import { rememberTxn } from '../../txns.js';
 
 /** The two seeded plans (Phase-1 seed). Labels mirror the Maxio products. */
 const PLANS = [
@@ -97,6 +98,15 @@ export function BookForm() {
         ...(couponCode.trim() ? { couponCode: couponCode.trim() } : {}),
       });
       setResponse(res);
+      if (res.status === 'ok') {
+        // Remember the transaction so the Usage form can act on it.
+        rememberTxn({
+          txnId: res.txnId,
+          label: `${firstName.trim()} ${lastName.trim()} · ${res.result.planName}`,
+          channelName: res.channelName,
+          createdAt: Date.now(),
+        });
+      }
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Unexpected error submitting booking');
     } finally {

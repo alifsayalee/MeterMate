@@ -1,4 +1,4 @@
-import type { SubscriptionResult } from '../types.js';
+import type { SubscriptionResult, UsageResult } from '../types.js';
 
 /**
  * Pure Block Kit builders. Each returns a Slack `blocks` array and touches no
@@ -83,6 +83,31 @@ export function buildSubscriptionActive(args: {
       ['Next bill', nextBill],
     ]),
     linkButton('View in Maxio', result.maxioUrl),
+  ];
+}
+
+/** UC2 in-progress message. */
+export function buildUsageProgress(componentLabel: string): SlackBlock[] {
+  return [section(`:bar_chart: *Recording usage* against *${componentLabel}*…`)];
+}
+
+/** UC2 completion message with quantity + running period total. */
+export function buildUsageRecorded(args: { result: UsageResult }): SlackBlock[] {
+  const { result } = args;
+  const unit = result.unitName ?? 'units';
+  const qty = `${result.recordedQuantity} ${unit}`;
+  const period =
+    result.periodTotal === null ? 'n/a (event-based)' : `${result.periodTotal} ${unit}`;
+  const fieldPairs: Array<[string, string]> = [
+    ['Component', result.componentHandle],
+    ['Recorded', qty],
+    ['Period total', period],
+  ];
+  if (result.memo) fieldPairs.push(['Memo', result.memo]);
+  return [
+    header(':white_check_mark: Usage recorded'),
+    fields(fieldPairs),
+    context('Accrues to the next invoice.'),
   ];
 }
 

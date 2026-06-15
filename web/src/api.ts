@@ -96,3 +96,79 @@ export async function book(req: BookRequest): Promise<BookResponse> {
   }
   return data;
 }
+
+// ── UC2 — Report Session Usage ───────────────────────────────────────────────
+
+export interface UsageResult {
+  componentHandle: string;
+  componentId: number;
+  componentKind: string;
+  unitName: string | null;
+  recordedVia: 'usage' | 'event';
+  recordedQuantity: number;
+  periodTotal: number | null;
+  memo: string | null;
+  usageId: string | null;
+}
+
+export interface UsageRequest {
+  txnRef: string;
+  componentHandle: string;
+  quantity: number;
+  memo?: string;
+  timestamp?: string;
+}
+
+export interface UsageOk {
+  status: 'ok';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  result: UsageResult;
+}
+
+export interface UsageInvalid {
+  status: 'invalid';
+  errors: Array<{ path: string; message: string }>;
+}
+
+/** Transaction not found / no subscription (HTTP 409). */
+export interface UsageSessionExpired {
+  status: 'session_expired';
+  sessionId: string;
+  txnId?: string;
+  error: string;
+}
+
+/** Billing failure (HTTP 502). */
+export interface UsageMaxioFailed {
+  status: 'maxio_failed';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  error: string;
+}
+
+export type UsageResponse = UsageOk | UsageInvalid | UsageSessionExpired | UsageMaxioFailed;
+
+/**
+ * Record usage against a component on an existing transaction. Returns the
+ * discriminated response for all expected statuses; throws only on
+ * transport/unexpected errors.
+ */
+export async function recordUsage(req: UsageRequest): Promise<UsageResponse> {
+  const sessionId = getSessionId();
+  const res = await fetch('/api/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+
+  const data = (await res.json()) as UsageResponse;
+  if ((data.status === 'ok' || data.status === 'maxio_failed' || data.status === 'session_expired') && 'sessionId' in data) {
+    setSessionId(data.sessionId);
+  }
+  return data;
+}

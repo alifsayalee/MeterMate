@@ -5,6 +5,7 @@ import { sessionCount } from './stores/sessionStore.js';
 import { transactionCount } from './stores/transactionStore.js';
 import { slackHealthCheck } from './services/slackService.js';
 import { bookRouter } from './routes/book.js';
+import { usageRouter } from './routes/usage.js';
 import { metaRouter } from './routes/meta.js';
 
 const app = express();
@@ -33,6 +34,7 @@ app.get('/api/health', async (_req: Request, res: Response) => {
 // Use-case routes (mounted as built, slice by slice).
 app.use(metaRouter);
 app.use(bookRouter);
+app.use(usageRouter);
 
 // Centralised error handler — never leak stack traces to clients.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
