@@ -107,3 +107,15 @@ export function countForPair(consultantId: string, clientEmail: string): number 
 export function transactionCount(): number {
   return transactions.size;
 }
+
+/** Unique Maxio subscription ids belonging to a consultant (for the digest). */
+export function subscriptionIdsForConsultant(consultantId: string): number[] {
+  const key = consultantId.toLowerCase();
+  const ids = new Set<number>();
+  for (const t of transactions.values()) {
+    if (t.consultantId.toLowerCase() === key && t.maxioSubscriptionId !== undefined) {
+      ids.add(t.maxioSubscriptionId);
+    }
+  }
+  return [...ids];
+}
