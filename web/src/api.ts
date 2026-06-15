@@ -1,4 +1,5 @@
 import { getSessionId, setSessionId } from './session.js';
+import { basicAuthHeader } from './admin.js';
 
 /**
  * Typed fetch wrappers matching the verified backend contract. One function per
@@ -349,6 +350,90 @@ export async function controlLifecycle(req: LifecycleRequest): Promise<Lifecycle
     body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
   });
   const data = (await res.json()) as LifecycleResponse;
+  persistSession(data as never);
+  return data;
+}
+
+// ── UC5 — Invoice Issue + Send (admin) ───────────────────────────────────────
+
+export interface InvoiceLineItem {
+  title: string;
+  quantity: number;
+  unitPrice: number;
+}
+
+export interface InvoiceResult {
+  invoiceUid: string;
+  invoiceNumber: string | null;
+  status: string;
+  totalAmount: string;
+  dueAmount: string;
+  dueDate: string | null;
+  publicUrl: string | null;
+  emailed: boolean;
+  recipientEmail: string | null;
+  maxioUrl: string;
+}
+
+export interface InvoiceRequest {
+  txnRef: string;
+  lineItems: InvoiceLineItem[];
+  memo?: string;
+  sendEmail: boolean;
+}
+
+export interface InvoiceOk {
+  status: 'ok';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  result: InvoiceResult;
+}
+interface InvoiceInvalid {
+  status: 'invalid';
+  errors: Array<{ path: string; message: string }>;
+}
+interface InvoiceSessionExpired {
+  status: 'session_expired';
+  sessionId: string;
+  txnId?: string;
+  error: string;
+}
+interface InvoiceMaxioFailed {
+  status: 'maxio_failed';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  error: string;
+}
+/** Admin credentials missing/invalid (HTTP 401). */
+interface InvoiceUnauthorized {
+  status: 'unauthorized';
+  error: string;
+}
+export type InvoiceResponse =
+  | InvoiceOk
+  | InvoiceInvalid
+  | InvoiceSessionExpired
+  | InvoiceMaxioFailed
+  | InvoiceUnauthorized;
+
+/**
+ * Issue (and optionally email) an ad-hoc invoice. Admin-only: sends the Basic
+ * auth header from the admin store; surfaces `unauthorized` if it's missing.
+ */
+export async function issueInvoice(req: InvoiceRequest): Promise<InvoiceResponse> {
+  const auth = basicAuthHeader();
+  if (!auth) return { status: 'unauthorized', error: 'Admin login required' };
+  const sessionId = getSessionId();
+  const res = await fetch('/api/invoices', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: auth },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+  const data = (await res.json()) as InvoiceResponse;
   persistSession(data as never);
   return data;
 }
