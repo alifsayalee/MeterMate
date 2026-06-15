@@ -1,6 +1,11 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import cors from 'cors';
 import { config } from './config.js';
+import { sessionCount } from './stores/sessionStore.js';
+import { transactionCount } from './stores/transactionStore.js';
+import { slackHealthCheck } from './services/slackService.js';
+import { bookRouter } from './routes/book.js';
+import { metaRouter } from './routes/meta.js';
 
 const app = express();
 
@@ -8,20 +13,26 @@ app.use(cors());
 app.use(express.json());
 
 /**
- * Health check (Phase 0). Reports liveness plus a snapshot of in-memory state
- * and which external integrations are configured. Slack/Maxio reachability
- * probes are added in their respective phases; for now we report config presence.
+ * Health check. Reports liveness, a snapshot of in-memory state, and external
+ * integration status. The Slack probe (auth.test) only runs when a token is
+ * configured, so health stays fast and green before Slack is wired up.
  */
-app.get('/api/health', (_req: Request, res: Response) => {
+app.get('/api/health', async (_req: Request, res: Response) => {
+  const slackOk = config.slack.botToken ? await slackHealthCheck() : false;
   res.json({
     status: 'ok',
-    sessions: 0,
-    transactions: 0,
+    sessions: sessionCount(),
+    transactions: transactionCount(),
     maxioSite: config.maxio.siteSubdomain ?? null,
     maxioConfigured: Boolean(config.maxio.apiKey && config.maxio.siteSubdomain),
     slackConfigured: Boolean(config.slack.botToken),
+    slackOk,
   });
 });
+
+// Use-case routes (mounted as built, slice by slice).
+app.use(metaRouter);
+app.use(bookRouter);
 
 // Centralised error handler — never leak stack traces to clients.
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
