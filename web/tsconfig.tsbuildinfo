@@ -1,1 +1,1 @@
-{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/session.ts","./src/txns.ts","./src/components/client/bookform.tsx","./src/components/client/planchangeform.tsx","./src/components/client/usageform.tsx"],"version":"5.9.3"}
+{"root":["./src/app.tsx","./src/api.ts","./src/main.tsx","./src/session.ts","./src/txns.ts","./src/components/client/bookform.tsx","./src/components/client/lifecycleform.tsx","./src/components/client/planchangeform.tsx","./src/components/client/usageform.tsx"],"version":"5.9.3"}
