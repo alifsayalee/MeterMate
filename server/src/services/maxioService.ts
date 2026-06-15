@@ -7,12 +7,15 @@ import {
   type EBBEvent,
   ErrorListResponseError,
   type CancellationRequest,
+  type CreateInvoiceRequest,
+  type SendInvoiceRequest,
   type SubscriptionMigrationPreviewRequest,
   type SubscriptionProductMigrationRequest,
   type UpdateSubscriptionRequest,
 } from '@maxio-com/advanced-billing-sdk';
 import {
   componentsController,
+  invoicesController,
   maxioAdminBaseUrl,
   productsController,
   subscriptionComponentsController,
@@ -23,6 +26,8 @@ import {
 import type {
   CancelType,
   CollectionMethodValue,
+  InvoiceLineItemInput,
+  InvoiceResult,
   LifecycleAction,
   LifecycleResult,
   PlanChangePreview,
@@ -535,4 +540,86 @@ export async function controlLifecycle(input: ControlLifecycleInput): Promise<Li
     if (error instanceof MaxioServiceError) throw error;
     throw summarizeMaxioError(error);
   }
+}
+
+// ── UC5 — Invoice Issue + Send ───────────────────────────────────────────────
+
+export interface IssueInvoiceInput {
+  subscriptionId: number;
+  lineItems: InvoiceLineItemInput[];
+  memo?: string;
+  sendEmail: boolean;
+  /** The customer's email — used as the recipient when sendEmail is true. */
+  recipientEmail?: string;
+}
+
+/**
+ * UC5 — create an ad-hoc invoice for the subscription from custom line items,
+ * which Maxio issues immediately (open status, with a hosted public payment
+ * URL), optionally email it to the customer, and read back amount due / due
+ * date / public URL.
+ */
+export async function issueInvoice(input: IssueInvoiceInput): Promise<InvoiceResult> {
+  const body: CreateInvoiceRequest = {
+    invoice: {
+      lineItems: input.lineItems.map((li) => ({
+        title: li.title,
+        quantity: li.quantity,
+        // Maxio expects a decimal-string unit price.
+        unitPrice: li.unitPrice.toFixed(2),
+      })),
+      ...(input.memo ? { memo: input.memo } : {}),
+    },
+  };
+
+  let invoice;
+  try {
+    const response = await invoicesController().createInvoice(input.subscriptionId, body);
+    invoice = response.result?.invoice;
+  } catch (error) {
+    throw summarizeMaxioError(error);
+  }
+  if (!invoice || !invoice.uid) {
+    throw new MaxioServiceError('Maxio returned no invoice');
+  }
+  const uid = invoice.uid;
+
+  // Optionally email the issued invoice to the customer.
+  let emailed = false;
+  if (input.sendEmail && input.recipientEmail) {
+    const sendBody: SendInvoiceRequest = { recipientEmails: [input.recipientEmail] };
+    try {
+      await invoicesController().sendInvoice(uid, sendBody);
+      emailed = true;
+    } catch (error) {
+      // Email is best-effort: the invoice exists and is payable via the public
+      // URL; surface the failure but don't discard the issued invoice.
+      console.warn('[uc5] sendInvoice failed:', error instanceof Error ? error.message : error);
+    }
+  }
+
+  // The create response carries the public URL for open invoices; re-read only
+  // if it's missing, so the "Pay Invoice" link is always populated when available.
+  let publicUrl = invoice.publicUrl ?? null;
+  if (!publicUrl) {
+    try {
+      const reread = await invoicesController().readInvoice(uid);
+      publicUrl = reread.result?.publicUrl ?? null;
+    } catch {
+      // leave null; the invoice was still issued.
+    }
+  }
+
+  return {
+    invoiceUid: uid,
+    invoiceNumber: invoice.number ?? null,
+    status: invoice.status ?? 'open',
+    totalAmount: invoice.totalAmount ?? '0.00',
+    dueAmount: invoice.dueAmount ?? invoice.totalAmount ?? '0.00',
+    dueDate: invoice.dueDate ?? null,
+    publicUrl,
+    emailed,
+    recipientEmail: input.sendEmail ? (input.recipientEmail ?? null) : null,
+    maxioUrl: `${maxioAdminBaseUrl()}/subscriptions/${input.subscriptionId}`,
+  };
 }
