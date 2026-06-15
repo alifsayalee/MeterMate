@@ -172,3 +172,115 @@ export async function recordUsage(req: UsageRequest): Promise<UsageResponse> {
   }
   return data;
 }
+
+// ── UC3 — Plan Change ────────────────────────────────────────────────────────
+
+export type PlanChangeTiming = 'prorate' | 'at-renewal';
+
+export interface PlanChangePreview {
+  targetHandle: string;
+  proratedAdjustmentInCents: number;
+  chargeInCents: number;
+  paymentDueInCents: number;
+  creditAppliedInCents: number;
+}
+
+export interface PlanChangeResult {
+  timing: PlanChangeTiming;
+  oldPlanName: string;
+  newPlanName: string;
+  newPlanHandle: string;
+  state: string;
+  scheduled: boolean;
+  effectiveDate: string | null;
+  paymentDueInCents: number | null;
+  maxioUrl: string;
+}
+
+export interface PlanChangeRequest {
+  txnRef: string;
+  targetHandle: string;
+  timing: PlanChangeTiming;
+}
+
+interface PlanChangeInvalid {
+  status: 'invalid';
+  errors: Array<{ path: string; message: string }>;
+}
+interface PlanChangeSessionExpired {
+  status: 'session_expired';
+  sessionId: string;
+  txnId?: string;
+  error: string;
+}
+interface PlanChangeMaxioFailed {
+  status: 'maxio_failed';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  error: string;
+}
+
+export interface PreviewOk {
+  status: 'ok';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  preview: PlanChangePreview;
+}
+export type PreviewResponse =
+  | PreviewOk
+  | PlanChangeInvalid
+  | PlanChangeSessionExpired
+  | PlanChangeMaxioFailed;
+
+export interface CommitOk {
+  status: 'ok';
+  sessionId: string;
+  txnId: string;
+  channelId: string | null;
+  channelName: string | null;
+  result: PlanChangeResult;
+}
+export type CommitResponse =
+  | CommitOk
+  | PlanChangeInvalid
+  | PlanChangeSessionExpired
+  | PlanChangeMaxioFailed;
+
+function persistSession(data: { status: string } & Record<string, unknown>): void {
+  if (
+    (data.status === 'ok' || data.status === 'maxio_failed' || data.status === 'session_expired') &&
+    typeof data['sessionId'] === 'string'
+  ) {
+    setSessionId(data['sessionId']);
+  }
+}
+
+/** Preview the prorated cost of a plan change (no commit). */
+export async function previewPlanChange(req: PlanChangeRequest): Promise<PreviewResponse> {
+  const sessionId = getSessionId();
+  const res = await fetch('/api/plan-change/preview', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+  const data = (await res.json()) as PreviewResponse;
+  persistSession(data as never);
+  return data;
+}
+
+/** Commit a plan change (prorate now or schedule at renewal). */
+export async function commitPlanChange(req: PlanChangeRequest): Promise<CommitResponse> {
+  const sessionId = getSessionId();
+  const res = await fetch('/api/plan-change', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ...req, ...(sessionId ? { sessionId } : {}) }),
+  });
+  const data = (await res.json()) as CommitResponse;
+  persistSession(data as never);
+  return data;
+}
